@@ -1,0 +1,48 @@
+{
+  "name": "telegram-intercom-bridge",
+  "version": "1.0.0",
+  "description": "A service that bridges Telegram channels with Intercom conversations",
+  "main": "build/index.js",
+  "scripts": {
+    "clean": "rm -rf build && rm -rf src/**/*.js",
+    "build": "npm run clean && tsc",
+    "start": "node build/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "test": "jest",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": [
+    "telegram",
+    "intercom",
+    "bridge",
+    "messaging",
+    "bot"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^22.10.10",
+    "dotenv": "^16.4.7",
+    "https-proxy-agent": "^7.0.6",
+    "intercom-client": "^6.0.0",
+    "redis": "^4.7.0",
+    "socks-proxy-agent": "^8.0.5",
+    "telegraf": "^4.16.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@typescript-eslint/eslint-plugin": "^7.0.2",
+    "@typescript-eslint/parser": "^7.0.2",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.2.5",
+    "ts-jest": "^29.1.2",
+    "ts-node-dev": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
