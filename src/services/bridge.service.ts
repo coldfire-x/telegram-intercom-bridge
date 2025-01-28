@@ -161,10 +161,10 @@ export class BridgeService {
         this.intercomService.on('message', async (message: Message) => {
             try {
                 console.log('Processing Intercom message:', {
-                    conversationId: message.sender.id
+                    message
                 });
 
-                const telegramGroupId = await this.redisService.getTelegramGroup(message.sender.id);
+                const telegramGroupId = message.groupId;
                 
                 if (telegramGroupId) {
                     console.log('Forwarding to Telegram group:', {
@@ -221,7 +221,21 @@ export class BridgeService {
     }
 
     private formatMessageForTelegram(message: Message): string {
-        return `<b>From Intercom</b>\n${message.text}`;
+        // Remove HTML tags and decode HTML entities
+        let cleanText = message.text
+            .replace(/<p[^>]*>/g, '') // Remove <p> tags with any attributes
+            .replace(/<\/p>/g, '\n') // Replace closing </p> with newline
+            .replace(/<br\s*\/?>/g, '\n') // Replace <br> tags with newline
+            .replace(/<[^>]+>/g, '') // Remove any remaining HTML tags
+            .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+            .replace(/&lt;/g, '<') // Replace &lt; with <
+            .replace(/&gt;/g, '>') // Replace &gt; with >
+            .replace(/&amp;/g, '&') // Replace &amp; with &
+            .replace(/&quot;/g, '"') // Replace &quot; with "
+            .trim(); // Remove extra whitespace
+
+        // Format the message with sender info
+        return `💬 <b>Intercom Support</b>\n\n${cleanText}`;
     }
 
     async start(): Promise<void> {

@@ -5,9 +5,11 @@ A Node.js service that bridges communication between Telegram channels and Inter
 ## Features
 
 - Two-way message synchronization between Telegram channels and Intercom conversations
+- Real-time message delivery using Intercom webhooks
 - Support for text messages and file attachments
 - Automatic conversation mapping and management
 - Redis-based message queue for reliable message delivery
+- HTML message formatting and sanitization
 - Error handling and retry mechanisms
 - Scalable architecture
 
@@ -17,6 +19,7 @@ A Node.js service that bridges communication between Telegram channels and Inter
 - Redis server
 - Telegram Bot Token (from [@BotFather](https://t.me/botfather))
 - Intercom Access Token
+- ngrok or similar tool for webhook development
 
 ## Installation
 
@@ -36,16 +39,23 @@ A Node.js service that bridges communication between Telegram channels and Inter
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
    INTERCOM_ACCESS_TOKEN=your_intercom_access_token
    REDIS_URL=redis://localhost:6379
+   WEBHOOK_PORT=3000
    ```
 
 ## Usage
 
-1. Build the TypeScript code:
+1. Start ngrok to create a tunnel for Intercom webhooks:
+   ```bash
+   ngrok http 3000
+   ```
+   Copy the HTTPS URL provided by ngrok (e.g., `https://your-subdomain.ngrok.io`)
+
+2. Build the TypeScript code:
    ```bash
    npm run build
    ```
 
-2. Start the service:
+3. Start the service:
    ```bash
    npm start
    ```
@@ -72,6 +82,16 @@ The service will start listening for messages from both Telegram channels and In
    - Write conversations
    - Read admins
    - Write admins
+3. Set up webhooks:
+   - In your Intercom app settings, go to "Webhooks" under "Developer Tools"
+   - Add a new webhook with the URL: `https://your-ngrok-subdomain/webhook/intercom`
+   - Subscribe to the following topics:
+     - `conversation.admin.replied`
+     - `conversation.admin.noted`
+     - `conversation.admin.single.created`
+   - Save the webhook configuration
+
+The service will now receive real-time updates from Intercom through the webhook endpoint.
 
 ## Architecture
 

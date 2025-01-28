@@ -2,6 +2,8 @@ import { Message } from '../types';
 import { EventEmitter } from 'events';
 import { IntercomClient } from 'intercom-client';
 import { RedisService } from './redis.service';
+import express, { Request, Response } from 'express';
+import bodyParser from 'body-parser';
 
 interface IntercomAttachment {
     type: string;
@@ -48,23 +50,119 @@ interface TelegramMessage {
 
 export class IntercomService extends EventEmitter {
     private client: any;
-    private conversationPollingInterval: NodeJS.Timeout | null = null;
-    private lastCheckedTimestamp: number = Date.now();
+    private webhookServer: express.Express = express();
+    private webhookPort: number;
 
     constructor(
         accessToken: string,
-        private redisService: RedisService
+        private redisService: RedisService,
+        webhookPort: number = 3000
     ) {
         super();
         console.log('Initializing Intercom client...');
         try {
             this.client = new IntercomClient({ token: accessToken });
+            this.webhookPort = webhookPort;
+            this.initializeWebhookServer();
             console.log('Intercom client initialized successfully');
         } catch (error: unknown) {
             const intercomError = error as IntercomErrorResponse;
             console.error('Failed to initialize Intercom client:', intercomError.message);
             throw error;
         }
+    }
+
+    private initializeWebhookServer() {
+        this.webhookServer.use(bodyParser.json());
+
+        // Webhook endpoint for Intercom
+        this.webhookServer.post('/webhook/intercom', async (req: Request, res: Response) => {
+            try {
+                const { type, data } = req.body;
+                const conversationParts = data?.item?.conversation_parts?.conversation_parts || [];
+                const latestPart = conversationParts[0];
+
+                console.log('Received webhook from Intercom:', {
+                    type,
+                    topic: data?.item?.type,
+                    partType: latestPart?.part_type,
+                    authorType: latestPart?.author?.type,
+                    source: data?.item?.source?.type,
+                });
+
+                // Only handle admin messages in conversations
+                if (type === 'notification_event' && 
+                    data?.item?.type === 'conversation' &&
+                    latestPart?.part_type === 'comment' &&
+                    latestPart?.author?.type === 'admin') {
+                    
+                    const conversation = data.item;
+                    
+                    // Skip if the message is from a bot or automated source
+                    if (conversation?.source?.type === 'automated' || conversation?.source?.type === 'operator') {
+                        console.log('Skipping automated/operator message');
+                        res.status(200).send('OK');
+                        return;
+                    }
+
+                    // Extract the Telegram group ID from custom attributes
+                    const telegramGroupId = conversation.custom_attributes?.telegram_group_id;
+                    if (!telegramGroupId) {
+                        console.log('No Telegram group ID found for conversation:', conversation.id);
+                        res.status(200).send('OK');
+                        return;
+                    }
+
+                    const formattedMessage: Message = {
+                        id: latestPart.id,
+                        text: latestPart.body || '',
+                        sender: {
+                            id: latestPart.author.id,
+                            type: 'intercom',
+                            name: `${latestPart.author.name} (Intercom Admin)`
+                        },
+                        groupId: telegramGroupId,
+                        groupName: conversation.custom_attributes?.telegram_group_name || 'Intercom Conversation',
+                        timestamp: latestPart.created_at * 1000 // Convert to milliseconds
+                    };
+
+                    if (latestPart.attachments && latestPart.attachments.length > 0) {
+                        formattedMessage.attachments = latestPart.attachments.map((attachment: IntercomAttachment) => ({
+                            type: attachment.type,
+                            url: attachment.url
+                        }));
+                    }
+
+                    console.log('Forwarding admin message to Telegram:', {
+                        messageId: latestPart.id,
+                        adminName: latestPart.author.name,
+                        telegramGroupId,
+                        partType: latestPart.part_type,
+                        sourceType: conversation.source.type
+                    });
+
+                    this.emit('message', formattedMessage);
+                } else {
+                    console.log('Skipping message:', {
+                        isNotification: type === 'notification_event',
+                        isConversation: data?.item?.type === 'conversation',
+                        partType: latestPart?.part_type,
+                        authorType: latestPart?.author?.type,
+                        sourceType: data?.item?.source?.type
+                    });
+                }
+
+                res.status(200).send('OK');
+            } catch (error) {
+                console.error('Error processing Intercom webhook:', error);
+                res.status(500).send('Internal Server Error');
+            }
+        });
+
+        // Start the webhook server
+        this.webhookServer.listen(this.webhookPort, () => {
+            console.log(`Webhook server listening on port ${this.webhookPort}`);
+        });
     }
 
     private async getOrCreateContact(
@@ -286,62 +384,6 @@ export class IntercomService extends EventEmitter {
         }
     }
 
-    async startPolling(pollingInterval: number = 30000): Promise<void> {
-        if (this.conversationPollingInterval) {
-            clearInterval(this.conversationPollingInterval);
-        }
-
-        this.conversationPollingInterval = setInterval(async () => {
-            try {
-                const conversations = await this.client.conversations.list({
-                    modifiedSince: this.lastCheckedTimestamp
-                });
-
-                for (const conversation of conversations.conversations) {
-                    const lastMessage = conversation.conversation_parts.conversation_parts[
-                        conversation.conversation_parts.conversation_parts.length - 1
-                    ];
-
-                    if (lastMessage && lastMessage.created_at * 1000 > this.lastCheckedTimestamp) {
-                        const message: Message = {
-                            id: lastMessage.id,
-                            text: lastMessage.body || '',
-                            sender: {
-                                id: conversation.id,
-                                type: 'intercom',
-                                name: lastMessage.author.name || 'Intercom User'
-                            },
-                            groupId: conversation.id,
-                            groupName: conversation.source?.name || 'Intercom Conversation',
-                            timestamp: lastMessage.created_at * 1000
-                        };
-
-                        if (lastMessage.attachments && lastMessage.attachments.length > 0) {
-                            message.attachments = lastMessage.attachments.map((attachment: IntercomAttachment) => ({
-                                type: attachment.type,
-                                url: attachment.url
-                            }));
-                        }
-
-                        this.emit('message', message);
-                    }
-                }
-
-                this.lastCheckedTimestamp = Date.now();
-            } catch (error) {
-                console.error('Error polling Intercom conversations:', error);
-                this.emit('error', error);
-            }
-        }, pollingInterval);
-    }
-
-    async stopPolling(): Promise<void> {
-        if (this.conversationPollingInterval) {
-            clearInterval(this.conversationPollingInterval);
-            this.conversationPollingInterval = null;
-        }
-    }
-
     async getConversation(conversationId: string): Promise<any> {
         try {
             return await this.client.conversations.find({ id: conversationId });
@@ -494,5 +536,13 @@ export class IntercomService extends EventEmitter {
         }
         formattedMessage += `\nGroup: ${message.groupName}\n\n${message.text}`;
         return formattedMessage;
+    }
+
+    async startPolling(): Promise<void> {
+        console.warn('Polling is deprecated. Please use webhooks instead.');
+    }
+
+    async stopPolling(): Promise<void> {
+        console.warn('Polling is deprecated. Please use webhooks instead.');
     }
 } 
